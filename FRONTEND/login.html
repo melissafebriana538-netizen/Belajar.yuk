@@ -62,40 +62,48 @@
         }
 
         async function loginUser() {
-            const email = document.getElementById('loginEmail').value.trim();
-            const password = document.getElementById('loginPassword').value;
-            if (!email || !password) return alert('Email dan password harus diisi');
-            
-            try {
-                const res = await fetch(`${API}/login`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, password })
-                });
-                const data = await res.json();
-                console.log('Response login:', data);
-                
-                if (res.ok) {
-                    if (!data.token) {
-                        console.error('Token tidak ditemukan dalam response:', data);
-                        alert('Respons dari server tidak mengandung token. Periksa backend.');
-                        return;
-                    }
-                    localStorage.setItem('token', data.token);
-                    localStorage.setItem('user', JSON.stringify(data.user));
-                    
-                    console.log('Token tersimpan:', localStorage.getItem('token'));
-                    console.log('User tersimpan:', localStorage.getItem('user'));
-                    
-                    window.location.href = 'dashboard.html';
-                } else {
-                    alert(data.message || data.msg || 'Login gagal. Periksa email/password.');
-                }
-            } catch (err) {
-                console.error(err);
-                alert('Error: Pastikan backend berjalan di "https://belajaryuk-production.up.railway.app/api" (port 80) melalui proxy Laragon/XAMPP, atau backend Node.js di port 3000 dengan CORS yang benar.');
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    if (!email || !password) return alert('Email dan password harus diisi');
+    
+    try {
+        const res = await fetch(`${API}/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        console.log('Response login:', data);
+        
+        if (res.ok) {
+            if (!data.token) {
+                console.error('Token tidak ditemukan dalam response:', data);
+                alert('Respons dari server tidak mengandung token. Periksa backend.');
+                return;
             }
+            // ✅ Simpan token dan user terlebih dahulu
+            localStorage.setItem('token', data.token);
+            localStorage.setItem('user', JSON.stringify(data.user));
+            
+            console.log('Token tersimpan:', localStorage.getItem('token'));
+            console.log('User tersimpan:', localStorage.getItem('user'));
+            
+            // ✅ Redirect berdasarkan role setelah data tersimpan
+            if (data.user.role === 'admin') {
+                window.location.href = 'admin.html';
+            } else {
+                window.location.href = 'dashboard.html';
+            }
+        } else {
+            alert(data.message || data.msg || 'Login gagal. Periksa email/password.');
         }
+    } catch (err) {
+        console.error(err);
+        alert('Error: Pastikan backend berjalan di "https://belajaryuk-production.up.railway.app/api" (port 80) melalui proxy Laragon/XAMPP, atau backend Node.js di port 3000 dengan CORS yang benar.');
+    }
+}
+
+
 
         async function registerUser() {
             const name = document.getElementById('regName').value.trim();

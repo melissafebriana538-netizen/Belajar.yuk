@@ -18,23 +18,26 @@ const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-// MIDDLEWARE
+// ====================== CORS ======================
+// Izinkan semua origin untuk kemudahan (bisa disesuaikan dengan domain Anda)
 app.use(cors({
-    origin: "https://belajaryuk-production.up.railway.app/"
+  origin: true, // mengizinkan semua origin, atau ganti dengan "https://belajaryuk-production.up.railway.app"
+  credentials: true
 }));
-app.use(express.static(path.join(__dirname, 'FRONTEND')));
+
 app.use(express.json());
+app.use(express.static(path.join(__dirname, 'FRONTEND')));
 app.use('/uploads', express.static('uploads'));
 
-// KONEKSI DATABASE
+// ====================== KONEKSI DATABASE ======================
 const dbURI = process.env.MONGODB_URI;
 if (!dbURI) {
   console.error('❌ MONGODB_URI environment variable not set');
   process.exit(1);
 }
 mongoose.connect(dbURI)
-.then(() => console.log('✅ Terhubung ke MongoDB Atlas'))
-.catch(err => console.log('❌ DB Error:', err));
+  .then(() => console.log('✅ Terhubung ke MongoDB Atlas'))
+  .catch(err => console.log('❌ DB Error:', err));
 
 // ====================== SCHEMA ======================
 const UserSchema = new mongoose.Schema({
@@ -44,6 +47,7 @@ const UserSchema = new mongoose.Schema({
   nim: { type: String, default: '' },
   university: { type: String, default: '' },
   avatar: { type: String, default: '' },
+  role: { type: String, enum: ['user', 'admin'], default: 'user' }, // <-- role di root
   preferences: {
     darkMode: { type: Boolean, default: false },
     language: { type: String, default: 'id' },
@@ -109,17 +113,30 @@ const ChatSchema = new mongoose.Schema({
 const Chat = mongoose.model('Chat', ChatSchema);
 const RoomDocument = require('./models/roomDocument');
 
-// VERIFY TOKEN
+// ====================== JWT SECRET ======================
+const JWT_SECRET = process.env.JWT_SECRET || 'SECRET_KEY';
+if (JWT_SECRET === 'SECRET_KEY') {
+  console.warn('⚠️ Gunakan JWT_SECRET environment variable di production');
+}
+
+// ====================== VERIFY TOKEN & ADMIN ======================
 const verifyToken = (req, res, next) => {
   const token = req.header('x-auth-token');
   if (!token) return res.status(401).json({ message: 'Akses ditolak' });
   try {
-    const decoded = jwt.verify(token, 'SECRET_KEY');
+    const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
     next();
   } catch (err) {
     res.status(400).json({ message: 'Token tidak valid' });
   }
+};
+
+const verifyAdmin = (req, res, next) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Akses ditolak. Bukan admin.' });
+  }
+  next();
 };
 
 // ====================== FUNGSI BANTU ======================
@@ -225,10 +242,14 @@ app.post('/api/register', async (req, res) => {
     if (userExist) return res.status(400).json({ message: 'Email sudah terdaftar' });
     const hashedPassword = await bcrypt.hash(password, 10);
     const userName = name && name.trim() ? name : email.split('@')[0];
-    const userBaru = new User({ email, password: hashedPassword, name: userName });
+    const userBaru = new User({ email, password: hashedPassword, name: userName, role: 'user' });
     await userBaru.save();
-    const token = jwt.sign({ userId: userBaru._id, email: userBaru.email, name: userBaru.name }, 'SECRET_KEY', { expiresIn: '7d' });
-    res.json({ message: 'Registrasi berhasil', token, user: { email: userBaru.email, name: userBaru.name } });
+    const token = jwt.sign(
+      { userId: userBaru._id, email: userBaru.email, name: userBaru.name, role: userBaru.role },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    res.json({ message: 'Registrasi berhasil', token, user: { email: userBaru.email, name: userBaru.name, role: userBaru.role } });
   } catch (error) {
     res.status(500).json({ message: 'Terjadi error', error: error.message });
   }
@@ -242,14 +263,55 @@ app.post('/api/login', async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User tidak ditemukan' });
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ message: 'Password salah' });
-    const token = jwt.sign({ userId: user._id, email: user.email, name: user.name }, 'SECRET_KEY', { expiresIn: '7d' });
-    res.json({ message: 'Login berhasil', token, user: { email: user.email, name: user.name } });
+    const token = jwt.sign(
+      { userId: user._id, email: user.email, name: user.name, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    res.json({ message: 'Login berhasil', token, user: { email: user.email, name: user.name, role: user.role } });
   } catch (error) {
     res.status(500).json({ message: 'Terjadi error', error: error.message });
   }
 });
 
-// ====================== MATERI & QUIZ PROGRESS ======================
+// ====================== ADMIN ROUTES ======================
+app.get('/api/admin/users', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const users = await User.find().select('-password');
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+app.get('/api/admin/materi', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const allMateri = await Materi.find().populate('userId', 'name email');
+    res.json(allMateri);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+app.delete('/api/admin/users/:id', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    await User.findByIdAndDelete(req.params.id);
+    res.json({ message: 'User berhasil dihapus' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+app.delete('/api/admin/materi/:id', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    await Materi.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Materi berhasil dihapus' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ====================== MATERI & QUIZ PROGRESS (user routes) ======================
 app.get('/api/materi', verifyToken, async (req, res) => {
   try {
     const materi = await Materi.find({ userId: req.user.userId }).sort({ createdAt: -1 });
@@ -378,6 +440,7 @@ app.post('/api/upload', verifyToken, upload.single('file'), async (req, res) => 
 
 // ====================== AI CHAT (Step & Quiz) ======================
 async function generateStep(topic, stepIndex, totalSteps, previousAnswer = null) {
+  // ... (fungsi ini tetap sama seperti kode Anda, tidak perlu diubah)
   let prompt = `Anda adalah AI tutor yang membantu siswa memahami topik "${topic}" secara bertahap.
 Sesi ini memiliki ${totalSteps} langkah.
 `;
@@ -452,6 +515,7 @@ async function completeStep(topic, totalSteps) {
 }
 
 app.post('/api/chat-ai', async (req, res) => {
+  // ... (fungsi chat-ai tetap sama seperti kode Anda, tidak perlu diubah)
   const { messages, selectedOption, topic, stepState } = req.body;
 
   if (selectedOption === 'step') {
@@ -654,8 +718,8 @@ app.put('/api/profile', verifyToken, async (req, res) => {
     if (university !== undefined) user.university = university;
     if (preferences) user.preferences = { ...user.preferences, ...preferences };
     await user.save();
-    const newToken = jwt.sign({ userId: user._id, email: user.email, name: user.name }, 'SECRET_KEY', { expiresIn: '7d' });
-    res.json({ message: 'Profil diperbarui', token: newToken, user: { email: user.email, name: user.name } });
+    const newToken = jwt.sign({ userId: user._id, email: user.email, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ message: 'Profil diperbarui', token: newToken, user: { email: user.email, name: user.name, role: user.role } });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -666,13 +730,13 @@ app.post('/api/profile/avatar', verifyToken, uploadAvatar.single('avatar'), asyn
   const avatarPath = `/uploads/avatars/${req.file.filename}`;
   try {
     await User.findByIdAndUpdate(req.user.userId, { avatar: avatarPath });
-    res.json({ avatarUrl: `https://belajaryuk-production.up.railway.app/${avatarPath}` });
+    res.json({ avatarUrl: `https://belajaryuk-production.up.railway.app${avatarPath}` });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// ====================== CHAT HISTORY (DENGAN ROOM) ======================
+// ====================== CHAT HISTORY ======================
 app.get('/api/chat/history', verifyToken, async (req, res) => {
   try {
     const room = req.query.room || 'general';
@@ -765,7 +829,6 @@ app.post('/api/room-document/upload', verifyToken, upload.single('file'), async 
       quizResults: []
     });
     await newMateri.save();
-    // Auto-share to room if roomCode provided
     if (roomCode) {
       const roomDoc = new RoomDocument({
         roomCode,
@@ -811,7 +874,7 @@ app.post('/api/room-document/upload', verifyToken, upload.single('file'), async 
   }
 });
 
-// ====================== SOCKET.IO (DENGAN PRIVATE ROOM) ======================
+// ====================== SOCKET.IO ======================
 let onlineUsers = {};
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
@@ -821,7 +884,6 @@ io.on('connection', (socket) => {
     io.emit('update online users', Object.values(onlineUsers));
   });
 
-  // Event untuk bergabung ke room tertentu (private room)
   socket.on('join-room', (roomCode) => {
     if (socket.room) {
       socket.leave(socket.room);
@@ -832,17 +894,15 @@ io.on('connection', (socket) => {
     socket.emit('joined-room', roomCode);
   });
 
-  // Event chat message dikirim ke room yang sudah disimpan
   socket.on('chat message', async (msg) => {
     try {
       const room = socket.room || 'general';
-      const newMsg = new Chat({ room: room, sender: msg.sender, text: msg.text });
+      const newMsg = new Chat({ room, sender: msg.sender, text: msg.text });
       await newMsg.save();
       io.to(room).emit('chat message', newMsg);
     } catch (err) { console.error(err); }
   });
 
-  // Shared document events
   socket.on('share-document', async (data) => {
     try {
       const room = socket.room || data.roomCode || 'general';
@@ -859,7 +919,6 @@ io.on('connection', (socket) => {
     } catch (err) { console.error(err); }
   });
 
-  // Collaborative quiz events
   socket.on('start-shared-quiz', (data) => {
     const room = socket.room || data.roomCode || 'general';
     io.to(room).emit('shared-quiz-started', data);
