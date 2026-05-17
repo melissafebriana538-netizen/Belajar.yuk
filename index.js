@@ -18,26 +18,23 @@ const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-// ====================== CORS ======================
-// Izinkan semua origin untuk kemudahan (bisa disesuaikan dengan domain Anda)
+// MIDDLEWARE
 app.use(cors({
-  origin: true, // mengizinkan semua origin, atau ganti dengan "https://belajaryuk-production.up.railway.app"
-  credentials: true
+    origin: "https://belajaryuk-production.up.railway.app"
 }));
-
-app.use(express.json());
 app.use(express.static(path.join(__dirname, 'FRONTEND')));
+app.use(express.json());
 app.use('/uploads', express.static('uploads'));
 
-// ====================== KONEKSI DATABASE ======================
+// KONEKSI DATABASE
 const dbURI = process.env.MONGODB_URI;
 if (!dbURI) {
   console.error('❌ MONGODB_URI environment variable not set');
   process.exit(1);
 }
 mongoose.connect(dbURI)
-  .then(() => console.log('✅ Terhubung ke MongoDB Atlas'))
-  .catch(err => console.log('❌ DB Error:', err));
+.then(() => console.log('✅ Terhubung ke MongoDB Atlas'))
+.catch(err => console.log('❌ DB Error:', err));
 
 // ====================== SCHEMA ======================
 const UserSchema = new mongoose.Schema({
@@ -47,7 +44,6 @@ const UserSchema = new mongoose.Schema({
   nim: { type: String, default: '' },
   university: { type: String, default: '' },
   avatar: { type: String, default: '' },
-  role: { type: String, enum: ['user', 'admin'], default: 'user' }, // <-- role di root
   preferences: {
     darkMode: { type: Boolean, default: false },
     language: { type: String, default: 'id' },
@@ -84,13 +80,15 @@ const ChatQuizSchema = new mongoose.Schema({
   topic: String,
   mode: { type: String, enum: ['quiz', 'step'] },
   questions: [{
-    text: String,
-    options: [String],
-    correct: Number,
-    userAnswer: Number,
-    isCorrect: Boolean,
-    explanation: String
-  }],
+  text: String,
+  options: [String],
+  correct: Number,
+  level: String,
+  formula: String,
+  explanation: String,
+  userAnswer: Number,
+  isCorrect: Boolean
+}],
   score: Number,
   completedAt: { type: Date, default: Date.now }
 });
@@ -113,30 +111,17 @@ const ChatSchema = new mongoose.Schema({
 const Chat = mongoose.model('Chat', ChatSchema);
 const RoomDocument = require('./models/roomDocument');
 
-// ====================== JWT SECRET ======================
-const JWT_SECRET = process.env.JWT_SECRET || 'SECRET_KEY';
-if (JWT_SECRET === 'SECRET_KEY') {
-  console.warn('⚠️ Gunakan JWT_SECRET environment variable di production');
-}
-
-// ====================== VERIFY TOKEN & ADMIN ======================
+// VERIFY TOKEN
 const verifyToken = (req, res, next) => {
   const token = req.header('x-auth-token');
   if (!token) return res.status(401).json({ message: 'Akses ditolak' });
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, 'SECRET_KEY');
     req.user = decoded;
     next();
   } catch (err) {
     res.status(400).json({ message: 'Token tidak valid' });
   }
-};
-
-const verifyAdmin = (req, res, next) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ message: 'Akses ditolak. Bukan admin.' });
-  }
-  next();
 };
 
 // ====================== FUNGSI BANTU ======================
@@ -176,7 +161,7 @@ async function generateQuizFromText(text, title) {
   if (estimatedQuestions < 5) estimatedQuestions = 5;
   if (estimatedQuestions > 20) estimatedQuestions = 20;
 
-  const prompt = `Buat soal pilihan ganda dari teks berikut. Jumlah soal target sekitar ${estimatedQuestions} soal. Setiap soal 4 opsi (A,B,C,D) dan jawaban benar (indeks 0-3). Output JSON: { "questions": [ { "text": "...", "options": ["...","...","...","..."], "correct": 0 } ] } JANGAN tambahkan teks lain. Teks: "${truncatedText}"`;
+  const prompt = `Buat ${estimatedQuestions} soal pilihan ganda dari materi berikut dengan distribusi level: 30% easy, 40% medium, 30% hard. Setiap soal sertakan rumus (jika relevan) dan penjelasan cara kerja. Output JSON: { "questions": [ { "text": "...", "options": [...], "correct": 0, "level": "easy/medium/hard", "formula": "...", "explanation": "..." } ] }`;
 
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -242,14 +227,10 @@ app.post('/api/register', async (req, res) => {
     if (userExist) return res.status(400).json({ message: 'Email sudah terdaftar' });
     const hashedPassword = await bcrypt.hash(password, 10);
     const userName = name && name.trim() ? name : email.split('@')[0];
-    const userBaru = new User({ email, password: hashedPassword, name: userName, role: 'user' });
+    const userBaru = new User({ email, password: hashedPassword, name: userName });
     await userBaru.save();
-    const token = jwt.sign(
-      { userId: userBaru._id, email: userBaru.email, name: userBaru.name, role: userBaru.role },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-    res.json({ message: 'Registrasi berhasil', token, user: { email: userBaru.email, name: userBaru.name, role: userBaru.role } });
+    const token = jwt.sign({ userId: userBaru._id, email: userBaru.email, name: userBaru.name }, 'SECRET_KEY', { expiresIn: '7d' });
+    res.json({ message: 'Registrasi berhasil', token, user: { email: userBaru.email, name: userBaru.name } });
   } catch (error) {
     res.status(500).json({ message: 'Terjadi error', error: error.message });
   }
@@ -263,55 +244,14 @@ app.post('/api/login', async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User tidak ditemukan' });
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ message: 'Password salah' });
-    const token = jwt.sign(
-      { userId: user._id, email: user.email, name: user.name, role: user.role },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-    res.json({ message: 'Login berhasil', token, user: { email: user.email, name: user.name, role: user.role } });
+    const token = jwt.sign({ userId: user._id, email: user.email, name: user.name }, 'SECRET_KEY', { expiresIn: '7d' });
+    res.json({ message: 'Login berhasil', token, user: { email: user.email, name: user.name } });
   } catch (error) {
     res.status(500).json({ message: 'Terjadi error', error: error.message });
   }
 });
 
-// ====================== ADMIN ROUTES ======================
-app.get('/api/admin/users', verifyToken, verifyAdmin, async (req, res) => {
-  try {
-    const users = await User.find().select('-password');
-    res.json(users);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-app.get('/api/admin/materi', verifyToken, verifyAdmin, async (req, res) => {
-  try {
-    const allMateri = await Materi.find().populate('userId', 'name email');
-    res.json(allMateri);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-app.delete('/api/admin/users/:id', verifyToken, verifyAdmin, async (req, res) => {
-  try {
-    await User.findByIdAndDelete(req.params.id);
-    res.json({ message: 'User berhasil dihapus' });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-app.delete('/api/admin/materi/:id', verifyToken, verifyAdmin, async (req, res) => {
-  try {
-    await Materi.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Materi berhasil dihapus' });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// ====================== MATERI & QUIZ PROGRESS (user routes) ======================
+// ====================== MATERI & QUIZ PROGRESS ======================
 app.get('/api/materi', verifyToken, async (req, res) => {
   try {
     const materi = await Materi.find({ userId: req.user.userId }).sort({ createdAt: -1 });
@@ -440,34 +380,49 @@ app.post('/api/upload', verifyToken, upload.single('file'), async (req, res) => 
 
 // ====================== AI CHAT (Step & Quiz) ======================
 async function generateStep(topic, stepIndex, totalSteps, previousAnswer = null) {
-  // ... (fungsi ini tetap sama seperti kode Anda, tidak perlu diubah)
-  let prompt = `Anda adalah AI tutor yang membantu siswa memahami topik "${topic}" secara bertahap.
-Sesi ini memiliki ${totalSteps} langkah.
-`;
-  if (previousAnswer !== null) {
-    prompt += `
-Siswa baru saja menjawab soal langkah ke-${stepIndex - 1} dengan jawaban: "${previousAnswer}".
-Berikan feedback singkat (1 kalimat) apakah jawabannya tepat atau tidak (gunakan pengetahuan Anda tentang topik ini).
-Kemudian LANJUTKAN ke langkah ke-${stepIndex} dengan materi yang lebih mendalam.
-Jangan ulang materi langkah sebelumnya.
-`;
-  } else {
-    prompt += `
-Siswa akan memulai langkah ke-${stepIndex} dari ${totalSteps}.
-Buat penjelasan mendalam untuk langkah ke-${stepIndex} (materi baru, tidak mengulang langkah sebelumnya).
-Setelah penjelasan, berikan satu soal pilihan ganda dengan 4 opsi (A, B, C, D) untuk menguji pemahaman.
-`;
-  }
-  prompt += `
-Output HARUS berupa JSON murni, tanpa teks tambahan, dengan format:
+  let prompt = `
+Anda adalah AI tutor profesional.
+
+Topik pembelajaran: "${topic}"
+
+Pembelajaran dilakukan bertahap sebanyak ${totalSteps} langkah.
+
+ATURAN PENTING:
+
+1. Jika topik berkaitan dengan matematika/fisika/statistika:
+   - wajib jelaskan rumus
+   - wajib jelaskan fungsi rumus
+   - wajib jelaskan arti simbol
+   - wajib berikan contoh perhitungan
+   - wajib berikan langkah pengerjaan
+
+2. Penjelasan harus DETAIL dan mudah dipahami mahasiswa.
+
+3. Setelah penjelasan:
+   - buat 1 soal latihan
+   - sertakan level kesulitan
+   - sertakan pembahasan singkat
+
+FORMAT JSON:
+
 {
   "type": "step",
   "stepIndex": ${stepIndex},
   "totalSteps": ${totalSteps},
-  "explanation": "Penjelasan detail...",
+
+  "explanation": "Penjelasan detail",
+
+  "formula": "Rumus yang digunakan",
+
+  "formulaExplanation": "Penjelasan rumus",
+
+  "example": "Contoh pengerjaan langkah demi langkah",
+
   "question": {
-    "text": "Teks soal pilihan ganda...",
-    "options": ["Opsi A", "Opsi B", "Opsi C", "Opsi D"],
+    "text": "Soal latihan",
+    "level": "easy",
+    "explanation": "Pembahasan singkat",
+    "options": ["A","B","C","D"],
     "correct": 0
   }
 }
@@ -507,175 +462,327 @@ Output HARUS berupa JSON murni, tanpa teks tambahan, dengan format:
   }
 }
 
+
 async function completeStep(topic, totalSteps) {
   return {
     type: 'step_complete',
     message: ` Selamat! Anda telah menyelesaikan ${totalSteps} langkah pemahaman untuk topik "${topic}". Teruslah berlatih!`
   };
 }
-
 app.post('/api/chat-ai', async (req, res) => {
-  // ... (fungsi chat-ai tetap sama seperti kode Anda, tidak perlu diubah)
   const { messages, selectedOption, topic, stepState } = req.body;
 
-  if (selectedOption === 'step') {
-    let currentStep = stepState?.stepIndex || 1;
-    let totalSteps = stepState?.totalSteps || 5;
-    let currentTopic = topic || (messages.find(m => m.role === 'user')?.content || 'belajar');
-    try {
+  try {
+
+    // ================= STEP MODE =================
+    if (selectedOption === 'step') {
+
+      const currentStep = stepState?.stepIndex || 1;
+      const totalSteps = stepState?.totalSteps || 5;
+
+      const currentTopic =
+        topic ||
+        messages.find(m => m.role === 'user')?.content ||
+        'belajar';
+
       if (currentStep <= totalSteps) {
-        const stepData = await generateStep(currentTopic, currentStep, totalSteps);
+
+        const stepData = await generateStep(
+          currentTopic,
+          currentStep,
+          totalSteps
+        );
+
         return res.json(stepData);
+
       } else {
-        const completeData = await completeStep(currentTopic, totalSteps);
+
+        const completeData = await completeStep(
+          currentTopic,
+          totalSteps
+        );
+
         return res.json(completeData);
       }
-    } catch (err) {
-      console.error("Error handling step:", err);
-      return res.status(500).json({ type: 'text', content: 'Maaf, terjadi kesalahan. Silakan coba lagi.' });
     }
-  }
 
-  const lastUserMsg = messages.filter(m => m.role === 'user').pop();
-  if (lastUserMsg && lastUserMsg.content.toLowerCase().startsWith('jawaban:')) {
-    const match = lastUserMsg.content.match(/jawaban:\s*([A-D])/i);
-    const userAnswerLetter = match ? match[1].toUpperCase() : null;
-    const currentStepIndex = stepState?.stepIndex || 1;
-    const totalSteps = stepState?.totalSteps || 5;
-    const currentTopic = topic || 'belajar';
-    if (currentStepIndex >= totalSteps) {
-      return res.json({ type: 'step_complete', message: `✅ Jawaban diterima. Anda telah menyelesaikan semua ${totalSteps} langkah. Selamat!` });
-    } else {
-      const nextStepIndex = currentStepIndex + 1;
-      try {
-        const nextStep = await generateStep(currentTopic, nextStepIndex, totalSteps, userAnswerLetter);
-        return res.json(nextStep);
-      } catch (err) {
-        console.error("Error generate next step:", err);
+    // ================= HANDLE JAWABAN STEP =================
+    const lastUserMsg = messages
+      .filter(m => m.role === 'user')
+      .pop();
+
+    if (
+      lastUserMsg &&
+      lastUserMsg.content.toLowerCase().startsWith('jawaban:')
+    ) {
+
+      const match = lastUserMsg.content.match(/jawaban:\s*([A-D])/i);
+
+      const userAnswerLetter = match
+        ? match[1].toUpperCase()
+        : null;
+
+      const currentStepIndex = stepState?.stepIndex || 1;
+      const totalSteps = stepState?.totalSteps || 5;
+      const currentTopic = topic || 'belajar';
+
+      if (currentStepIndex >= totalSteps) {
+
         return res.json({
-          type: 'step',
-          stepIndex: nextStepIndex,
-          totalSteps,
-          explanation: `Lanjutan materi ${currentTopic} - langkah ${nextStepIndex}.`,
-          question: { text: `Soal untuk langkah ${nextStepIndex}: Apa inti dari bagian ini?`, options: ["Opsi A", "Opsi B", "Opsi C", "Opsi D"], correct: 0 }
+          type: 'step_complete',
+          message:
+            `✅ Jawaban diterima. Anda telah menyelesaikan ` +
+            `${totalSteps} langkah.`
         });
+
+      } else {
+
+        const nextStepIndex = currentStepIndex + 1;
+
+        const nextStep = await generateStep(
+          currentTopic,
+          nextStepIndex,
+          totalSteps,
+          userAnswerLetter
+        );
+
+        return res.json(nextStep);
       }
     }
-  }
 
-  const systemPrompt = `Anda adalah AI tutor profesional berbasis kurikulum akademik.
-1. SUBTOPIC: jika user minta topik baru, buat subtopik lengkap minimal 6 maksimal 12, output { "type": "subtopics", "message": "...", "options": [...] }
-2. PENJELASAN+OPSI: jika user pilih subtopik (diawali "Pilih:"), berikan penjelasan mendalam lalu langsung beri opsi Quiz dan Step, output { "type": "explanation_with_options", "content": "...", "topic": "...", "message": "...", "options": ["Quiz","Pemahaman Step by Step"] }
-3. QUIZ: jika user pilih Quiz, langsung beri 5 soal pilihan ganda yang relevan dengan topik, output { "type": "quiz", "questions": [...], "topic": "..." }
-4. STEP BY STEP: jika user pilih Step, frontend akan menangani selectedOption='step' (tidak usah dihasilkan di sini).
-Hanya output JSON, tidak ada teks lain.`;
+    // ================= SYSTEM PROMPT =================
+    const systemPrompt = `
+Anda adalah AI tutor profesional berbasis kurikulum akademik.
 
-  try {
-    const lastUserMsg2 = messages.filter(m => m.role === 'user').pop();
+1. SUBTOPIC
+Jika user minta topik baru:
+Output:
+{
+"type":"subtopics",
+"message":"...",
+"options":[...]
+}
+
+2. PENJELASAN + OPSI
+Jika user pilih subtopik (diawali "Pilih:")
+Output:
+{
+"type":"explanation_with_options",
+"content":"...",
+"topic":"...",
+"message":"...",
+"options":["Quiz","Pemahaman Step by Step"]
+}
+
+3. QUIZ
+Jika user pilih Quiz:
+Output:
+{
+"type":"quiz",
+"questions":[...],
+"topic":"..."
+}
+
+4. STEP
+Jika user pilih Step:
+Frontend akan handle sendiri.
+
+HANYA JSON.
+`;
+
+    // ================= USER PROMPT =================
+    const lastUserMsg2 = messages
+      .filter(m => m.role === 'user')
+      .pop();
+
     let userPrompt = "";
 
+    // ===== QUIZ =====
     if (selectedOption === 'quiz') {
-      userPrompt = `INSTRUKSI WAJIB: User memilih QUIZ untuk topik "${topic}". 
-- JANGAN berikan penjelasan apapun.
-- JANGAN tawarkan pilihan lagi.
-- LANGSUNG buat 5 soal pilihan ganda tentang "${topic}".
-- Setiap soal harus memiliki 4 opsi (A,B,C,D) dan satu jawaban benar (indeks 0-3).
-- Pastikan soal dan opsi relevan dengan topik "${topic}".
-- Output HARUS JSON dengan format:
-{
-  "type": "quiz",
-  "questions": [
-    { "text": "Soal 1", "options": ["A1","B1","C1","D1"], "correct": 0 },
-    ...
-  ],
-  "topic": "${topic}"
-}
-HANYA JSON, TIDAK ADA TEKS LAIN.`;
-    } 
-    else if (lastUserMsg2 && lastUserMsg2.content.toLowerCase().startsWith('pilih:')) {
-      const subtopicName = lastUserMsg2.content.replace(/^pilih:\s*/i, '').trim();
-      userPrompt = `User memilih subtopik "${subtopicName}". Berikan penjelasan mendalam dan LANGSUNG berikan opsi Quiz dan Step (type "explanation_with_options").`;
-    } 
+
+      userPrompt = `
+User memilih QUIZ untuk topik "${topic}"
+
+Buat 10 soal pilihan ganda dengan level:
+
+1-3 easy
+4-7 medium
+8-10 hard
+
+Setiap soal memiliki:
+- text
+- level
+- formula
+- explanation
+- options
+- correct
+
+HANYA JSON.
+`;
+
+    }
+    // ===== SUBTOPIC =====
+    else if (
+      lastUserMsg2 &&
+      lastUserMsg2.content.toLowerCase().startsWith('pilih:')
+    ) {
+
+      const subtopicName = lastUserMsg2.content
+        .replace(/^pilih:\s*/i, '')
+        .trim();
+
+      userPrompt =
+        `User memilih subtopik "${subtopicName}". ` +
+        `Berikan penjelasan mendalam dan opsi Quiz & Step.`;
+
+    }
+    // ===== DEFAULT =====
     else {
-      userPrompt = lastUserMsg2 ? lastUserMsg2.content : "Halo";
+
+      userPrompt = lastUserMsg2
+        ? lastUserMsg2.content
+        : "Halo";
     }
 
-    const fullPrompt = `${systemPrompt}\n\nRiwayat:\n${JSON.stringify(messages)}\n\nInstruksi:\n${userPrompt}`;
-    
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${process.env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        model: 'llama-3.3-70b-versatile', 
-        messages: [{ role: 'user', content: fullPrompt }], 
-        temperature: 0.6, 
-        response_format: { type: "json_object" } 
-      })
-    });
-    if (!response.ok) throw new Error('AI gagal');
-    const data = await response.json();
-    let aiMessage = data.choices[0].message.content;
-    aiMessage = aiMessage.replace(/```json|```/g, '').trim();
-    let parsed = JSON.parse(aiMessage);
-    
-    if (parsed.options && Array.isArray(parsed.options)) {
-      parsed.options = parsed.options.map(opt => typeof opt === 'object' ? (opt.name || opt.text || String(opt)) : opt);
-    }
+    // ================= FULL PROMPT =================
+    const fullPrompt = `
+${systemPrompt}
 
-    if (selectedOption === 'quiz' && (parsed.type !== 'quiz' || !parsed.questions || parsed.questions.length === 0)) {
-      console.warn("⚠️ AI gagal menghasilkan quiz, gunakan fallback manual");
-      let quizTopic = topic;
-      if (!quizTopic || quizTopic === '') {
-        const lastUser = messages.filter(m => m.role === 'user').pop();
-        if (lastUser && lastUser.content.toLowerCase().startsWith('pilih:')) {
-          quizTopic = lastUser.content.replace(/^pilih:\s*/i, '').trim();
-        } else if (messages.length >= 2) {
-          const prevMsg = messages.slice(-2).find(m => m.role === 'user' && !m.content.toLowerCase().startsWith('pilih:'));
-          if (prevMsg) quizTopic = prevMsg.content.substring(0, 50);
-        }
-        if (!quizTopic) quizTopic = 'topik ini';
+Riwayat:
+${JSON.stringify(messages)}
+
+Instruksi:
+${userPrompt}
+`;
+
+    // ================= CALL AI =================
+    const response = await fetch(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            {
+              role: 'user',
+              content: fullPrompt
+            }
+          ],
+          temperature: 0.6,
+          response_format: {
+            type: "json_object"
+          }
+        })
       }
+    );
+
+    if (!response.ok) {
+      throw new Error('AI gagal');
+    }
+
+    const data = await response.json();
+
+    let aiMessage =
+      data.choices[0].message.content;
+
+    aiMessage = aiMessage
+      .replace(/```json|```/g, '')
+      .trim();
+
+    let parsed = JSON.parse(aiMessage);
+
+    // ================= NORMALIZE OPTIONS =================
+    if (
+      parsed.options &&
+      Array.isArray(parsed.options)
+    ) {
+
+      parsed.options = parsed.options.map(opt =>
+        typeof opt === 'object'
+          ? (opt.name || opt.text || String(opt))
+          : opt
+      );
+    }
+
+    // ================= FALLBACK QUIZ =================
+    if (
+      selectedOption === 'quiz' &&
+      (
+        parsed.type !== 'quiz' ||
+        !parsed.questions ||
+        parsed.questions.length === 0
+      )
+    ) {
+
+      const levels = [
+        'easy',
+        'easy',
+        'easy',
+        'medium',
+        'medium',
+        'medium',
+        'medium',
+        'hard',
+        'hard',
+        'hard'
+      ];
+
+      const fallbackQuestions = [];
+
+      for (let i = 0; i < 10; i++) {
+
+        fallbackQuestions.push({
+          text:
+            `Soal ${i + 1} tentang ${topic}`,
+
+          options: [
+            'Jawaban A',
+            'Jawaban B',
+            'Jawaban C',
+            'Jawaban D'
+          ],
+
+          correct: 0,
+
+          level: levels[i],
+
+          formula:
+            levels[i] === 'easy'
+              ? 'Rumus Dasar'
+              : 'Rumus Lanjutan',
+
+          explanation:
+            `Penjelasan soal ${i + 1}`
+        });
+      }
+
       parsed = {
         type: 'quiz',
-        questions: [
-          { text: `Apa yang dimaksud dengan ${quizTopic}?`, options: [`Pengertian ${quizTopic} yang benar`, `Definisi keliru`, `Konsep lain`, `Tidak ada yang benar`], correct: 0 },
-          { text: `Manakah contoh dari ${quizTopic}?`, options: [`Contoh A (relevan)`, `Contoh B (tidak relevan)`, `Contoh C (kurang tepat)`, `Contoh D (salah)`], correct: 0 },
-          { text: `Apa fungsi utama ${quizTopic} dalam pembelajaran?`, options: [`Fungsi A`, `Fungsi B`, `Fungsi C`, `Fungsi D`], correct: 0 },
-          { text: `Bagaimana cara mengidentifikasi ${quizTopic} dalam suatu kasus?`, options: [`Cara A`, `Cara B`, `Cara C`, `Cara D`], correct: 0 },
-          { text: `Kesimpulan penting tentang ${quizTopic} adalah?`, options: [`Kesimpulan A`, `Kesimpulan B`, `Kesimpulan C`, `Kesimpulan D`], correct: 0 }
-        ],
-        topic: quizTopic
+        topic: topic || 'topik',
+        questions: fallbackQuestions
       };
     }
 
-    res.json(parsed);
+    // ================= RETURN =================
+    return res.json(parsed);
+
   } catch (err) {
-    console.error("❌ AI Error:", err.message);
-    if (selectedOption === 'quiz') {
-      let quizTopic = topic || 'topik';
-      if (!quizTopic || quizTopic === '') {
-        const lastUser = messages.filter(m => m.role === 'user').pop();
-        if (lastUser && lastUser.content.toLowerCase().startsWith('pilih:')) {
-          quizTopic = lastUser.content.replace(/^pilih:\s*/i, '').trim();
-        }
-        if (!quizTopic) quizTopic = 'topik';
-      }
-      res.json({
-        type: 'quiz',
-        questions: [
-          { text: `Apa yang dimaksud dengan ${quizTopic}?`, options: [`Pengertian ${quizTopic}`, `Pilihan B`, `Pilihan C`, `Pilihan D`], correct: 0 },
-          { text: `Manakah contoh ${quizTopic}?`, options: [`Contoh 1`, `Contoh 2`, `Contoh 3`, `Contoh 4`], correct: 0 },
-          { text: `Apa fungsi utama ${quizTopic}?`, options: [`Fungsi A`, `Fungsi B`, `Fungsi C`, `Fungsi D`], correct: 0 },
-          { text: `Apa hubungan ${quizTopic} dengan topik lain?`, options: [`Hubungan A`, `Hubungan B`, `Hubungan C`, `Hubungan D`], correct: 0 },
-          { text: `Kesimpulan tentang ${quizTopic}?`, options: [`Kesimpulan A`, `Kesimpulan B`, `Kesimpulan C`, `Kesimpulan D`], correct: 0 }
-        ],
-        topic: quizTopic
-      });
-    } else {
-      res.status(500).json({ type: 'text', content: 'AI sedang sibuk, coba lagi.' });
-    }
+
+    console.error("❌ AI Error:", err);
+
+    return res.status(500).json({
+      type: 'text',
+      content: 'AI sedang sibuk, coba lagi.'
+    });
   }
 });
+
+
+  
 
 // ====================== OTHER ROUTES ======================
 app.get('/api/stats', verifyToken, async (req, res) => {
@@ -718,8 +825,8 @@ app.put('/api/profile', verifyToken, async (req, res) => {
     if (university !== undefined) user.university = university;
     if (preferences) user.preferences = { ...user.preferences, ...preferences };
     await user.save();
-    const newToken = jwt.sign({ userId: user._id, email: user.email, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ message: 'Profil diperbarui', token: newToken, user: { email: user.email, name: user.name, role: user.role } });
+    const newToken = jwt.sign({ userId: user._id, email: user.email, name: user.name }, 'SECRET_KEY', { expiresIn: '7d' });
+    res.json({ message: 'Profil diperbarui', token: newToken, user: { email: user.email, name: user.name } });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -730,13 +837,13 @@ app.post('/api/profile/avatar', verifyToken, uploadAvatar.single('avatar'), asyn
   const avatarPath = `/uploads/avatars/${req.file.filename}`;
   try {
     await User.findByIdAndUpdate(req.user.userId, { avatar: avatarPath });
-    res.json({ avatarUrl: `https://belajaryuk-production.up.railway.app${avatarPath}` });
+    res.json({ avatarUrl: `https://belajaryuk-production.up.railway.app/${avatarPath}` });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// ====================== CHAT HISTORY ======================
+// ====================== CHAT HISTORY (DENGAN ROOM) ======================
 app.get('/api/chat/history', verifyToken, async (req, res) => {
   try {
     const room = req.query.room || 'general';
@@ -829,6 +936,7 @@ app.post('/api/room-document/upload', verifyToken, upload.single('file'), async 
       quizResults: []
     });
     await newMateri.save();
+    // Auto-share to room if roomCode provided
     if (roomCode) {
       const roomDoc = new RoomDocument({
         roomCode,
@@ -874,7 +982,7 @@ app.post('/api/room-document/upload', verifyToken, upload.single('file'), async 
   }
 });
 
-// ====================== SOCKET.IO ======================
+// ====================== SOCKET.IO (DENGAN PRIVATE ROOM) ======================
 let onlineUsers = {};
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
@@ -884,6 +992,7 @@ io.on('connection', (socket) => {
     io.emit('update online users', Object.values(onlineUsers));
   });
 
+  // Event untuk bergabung ke room tertentu (private room)
   socket.on('join-room', (roomCode) => {
     if (socket.room) {
       socket.leave(socket.room);
@@ -894,15 +1003,17 @@ io.on('connection', (socket) => {
     socket.emit('joined-room', roomCode);
   });
 
+  // Event chat message dikirim ke room yang sudah disimpan
   socket.on('chat message', async (msg) => {
     try {
       const room = socket.room || 'general';
-      const newMsg = new Chat({ room, sender: msg.sender, text: msg.text });
+      const newMsg = new Chat({ room: room, sender: msg.sender, text: msg.text });
       await newMsg.save();
       io.to(room).emit('chat message', newMsg);
     } catch (err) { console.error(err); }
   });
 
+  // Shared document events
   socket.on('share-document', async (data) => {
     try {
       const room = socket.room || data.roomCode || 'general';
@@ -919,6 +1030,7 @@ io.on('connection', (socket) => {
     } catch (err) { console.error(err); }
   });
 
+  // Collaborative quiz events
   socket.on('start-shared-quiz', (data) => {
     const room = socket.room || data.roomCode || 'general';
     io.to(room).emit('shared-quiz-started', data);
@@ -944,3 +1056,5 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`🚀 Server jalan di port ${PORT}`);
 });
+
+
