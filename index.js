@@ -40,18 +40,10 @@ mongoose.connect(dbURI)
 const UserSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-
-  role: {
-    type: String,
-    enum: ['admin', 'student'],
-    default: 'student'
-  },
-
   name: { type: String, default: '' },
   nim: { type: String, default: '' },
   university: { type: String, default: '' },
   avatar: { type: String, default: '' },
-
   preferences: {
     darkMode: { type: Boolean, default: false },
     language: { type: String, default: 'id' },
@@ -122,35 +114,14 @@ const RoomDocument = require('./models/roomDocument');
 // VERIFY TOKEN
 const verifyToken = (req, res, next) => {
   const token = req.header('x-auth-token');
-
-  if (!token) {
-    return res.status(401).json({
-      message: 'Akses ditolak'
-    });
-  }
-
+  if (!token) return res.status(401).json({ message: 'Akses ditolak' });
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
+    const decoded = jwt.verify(token, 'SECRET_KEY');
     req.user = decoded;
-
     next();
-
   } catch (err) {
-    res.status(400).json({
-      message: 'Token tidak valid'
-    });
+    res.status(400).json({ message: 'Token tidak valid' });
   }
-};
-
-const verifyAdmin = (req, res, next) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({
-      message: 'Akses admin ditolak'
-    });
-  }
-
-  next();
 };
 
 // ====================== FUNGSI BANTU ======================
@@ -301,7 +272,7 @@ app.post('/api/register', async (req, res) => {
     if (userExist) return res.status(400).json({ message: 'Email sudah terdaftar' });
     const hashedPassword = await bcrypt.hash(password, 10);
     const userName = name && name.trim() ? name : email.split('@')[0];
-    const userBaru = new User({email, password: hashedPassword, name: userName, role: 'student'});
+    const userBaru = new User({ email, password: hashedPassword, name: userName });
     await userBaru.save();
     const token = jwt.sign({ userId: userBaru._id, email: userBaru.email, name: userBaru.name }, 'SECRET_KEY', { expiresIn: '7d' });
     res.json({ message: 'Registrasi berhasil', token, user: { email: userBaru.email, name: userBaru.name } });
@@ -318,8 +289,8 @@ app.post('/api/login', async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User tidak ditemukan' });
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ message: 'Password salah' });
-    const token = jwt.sign({userId: user._id, email: user.email, name: user.name, role: user.role}, 'SECRET_KEY', { expiresIn: '7d' });
-    res.json({message: 'Login berhasil', token, user: { email: user.email, name: user.name, role: user.role}});
+    const token = jwt.sign({ userId: user._id, email: user.email, name: user.name }, 'SECRET_KEY', { expiresIn: '7d' });
+    res.json({ message: 'Login berhasil', token, user: { email: user.email, name: user.name } });
   } catch (error) {
     res.status(500).json({ message: 'Terjadi error', error: error.message });
   }
@@ -894,8 +865,8 @@ app.put('/api/profile', verifyToken, async (req, res) => {
     if (university !== undefined) user.university = university;
     if (preferences) user.preferences = { ...user.preferences, ...preferences };
     await user.save();
-    const newToken = jwt.sign({userId: user._id, email: user.email, name: user.name, role: user.role}, 'SECRET_KEY', { expiresIn: '7d' });
-    res.json({ message: 'Profil diperbarui', token: newToken, user: { email: user.email, name: user.name, role: user.role}});
+    const newToken = jwt.sign({ userId: user._id, email: user.email, name: user.name }, 'SECRET_KEY', { expiresIn: '7d' });
+    res.json({ message: 'Profil diperbarui', token: newToken, user: { email: user.email, name: user.name } });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -1118,97 +1089,6 @@ io.on('connection', (socket) => {
     delete onlineUsers[socket.id];
     io.emit('update online users', Object.values(onlineUsers));
   });
-});
-
-// ====================== ADMIN ROUTES ======================
-
-// Ambil semua user
-app.get('/api/admin/users', verifyToken, verifyAdmin, async (req, res) => {
-  try {
-    const users = await User.find().select('-password');
-    res.json(users);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// Hapus user
-app.delete('/api/admin/users/:id', verifyToken, verifyAdmin, async (req, res) => {
-  try {
-    const user = await User.findById(req.params.id);
-
-    if (!user) {
-      return res.status(404).json({
-        message: 'User tidak ditemukan'
-      });
-    }
-
-    // jangan hapus admin
-    if (user.role === 'admin') {
-      return res.status(403).json({
-        message: 'Admin tidak bisa dihapus'
-      });
-    }
-
-    // hapus materi user
-    await Materi.deleteMany({
-      userId: user._id
-    });
-
-    // hapus user
-    await User.findByIdAndDelete(req.params.id);
-
-    res.json({
-      message: 'User berhasil dihapus'
-    });
-
-  } catch (err) {
-    res.status(500).json({
-      message: err.message
-    });
-  }
-});
-
-// Ambil semua materi
-app.get('/api/admin/materi', verifyToken, verifyAdmin, async (req, res) => {
-  try {
-
-    const materi = await Materi.find()
-      .populate('userId', 'name email')
-      .sort({ createdAt: -1 });
-
-    res.json(materi);
-
-  } catch (err) {
-    res.status(500).json({
-      message: err.message
-    });
-  }
-});
-
-// Hapus materi
-app.delete('/api/admin/materi/:id', verifyToken, verifyAdmin, async (req, res) => {
-  try {
-
-    const materi = await Materi.findById(req.params.id);
-
-    if (!materi) {
-      return res.status(404).json({
-        message: 'Materi tidak ditemukan'
-      });
-    }
-
-    await Materi.findByIdAndDelete(req.params.id);
-
-    res.json({
-      message: 'Materi berhasil dihapus'
-    });
-
-  } catch (err) {
-    res.status(500).json({
-      message: err.message
-    });
-  }
 });
 
 // ====================== START SERVER ======================
