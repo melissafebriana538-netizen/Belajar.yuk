@@ -550,46 +550,72 @@ app.post('/api/chat-ai', async (req, res) => {
       }
     }
 
-    // ================= SYSTEM PROMPT =================
-    const systemPrompt = `
-Anda adalah AI tutor profesional berbasis kurikulum akademik.
+    // ================= SYSTEM PROMPT ================
+const systemPrompt = `
+Anda adalah AI tutor profesional.
 
-1. SUBTOPIC
-Jika user minta topik baru:
-Output:
+Aturan:
+- Selalu jawab dalam format JSON valid.
+- Gunakan bahasa Indonesia yang jelas dan akademik.
+- Penjelasan harus detail dan mudah dipahami mahasiswa.
+
+ATURAN KHUSUS:
+
+Jika topik matematika/fisika/statistika:
+- jelaskan rumus
+- arti simbol
+- contoh penggunaan
+- langkah pengerjaan
+
+Jika topik pemrograman:
+- berikan kode
+- jelaskan logika program
+- berikan implementasi
+
+Jenis response yang diperbolehkan:
+
+1. subtopics
+Digunakan ketika user baru memasukkan topik utama.
+
 {
-"type":"subtopics",
-"message":"...",
-"options":[...]
+  "type":"subtopics",
+  "topic":"...",
+  "intro":"Penjelasan singkat topik",
+  "subtopics":[
+    "Pengertian",
+    "Rumus Dasar",
+    "Contoh Soal",
+    "Implementasi"
+  ]
 }
 
-2. PENJELASAN + OPSI
-Jika user pilih subtopik (diawali "Pilih:")
-Output:
+2. explanation_with_options
+
 {
-"type":"explanation_with_options",
-"content":"...",
-"topic":"...",
-"message":"...",
-"options":["Quiz","Pemahaman Step by Step"]
+  "type":"explanation_with_options",
+  "topic":"...",
+  "content":"Penjelasan lengkap",
+  "message":"Pilih metode belajar berikut:",
+  "options":["Quiz","Pemahaman Step by Step"]
 }
 
-3. QUIZ
-Jika user pilih Quiz:
-Output:
+3. quiz
+
 {
-"type":"quiz",
-"questions":[...],
-"topic":"..."
+  "type":"quiz",
+  "topic":"...",
+  "questions":[]
 }
 
-4. STEP
-Jika user pilih Step:
-Frontend akan handle sendiri.
+4. step
 
-HANYA JSON.
-`;
-
+{
+  "type":"step",
+  "stepIndex":1,
+  "totalSteps":5,
+  "explanation":"..."
+}
+` ; 
     // ================= USER PROMPT =================
     const lastUserMsg2 = messages
       .filter(m => m.role === 'user')
@@ -637,12 +663,29 @@ HANYA JSON.
 
     }
     // ===== DEFAULT =====
-    else {
+else {
 
-      userPrompt = lastUserMsg2
-        ? lastUserMsg2.content
-        : "Halo";
-    }
+  userPrompt = `
+User ingin belajar topik:
+
+"${lastUserMsg2?.content || 'Halo'}"
+
+Tugas:
+1. Berikan pengantar singkat topik
+2. Pecah materi menjadi beberapa subtopik pembelajaran
+3. Maksimal 15 subtopik
+4. Output HARUS type "subtopics"
+
+Format JSON:
+
+{
+  "type":"subtopics",
+  "topic":"...",
+  "intro":"...",
+  "subtopics":[]
+}
+`;
+}
 
     // ================= FULL PROMPT =================
     const fullPrompt = `
