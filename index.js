@@ -122,14 +122,35 @@ const RoomDocument = require('./models/roomDocument');
 // VERIFY TOKEN
 const verifyToken = (req, res, next) => {
   const token = req.header('x-auth-token');
-  if (!token) return res.status(401).json({ message: 'Akses ditolak' });
-  try {
-    const decoded = jwt.verify(token, 'SECRET_KEY');
-    req.user = decoded;
-    next();
-  } catch (err) {
-    res.status(400).json({ message: 'Token tidak valid' });
+
+  if (!token) {
+    return res.status(401).json({
+      message: 'Akses ditolak'
+    });
   }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    req.user = decoded;
+
+    next();
+
+  } catch (err) {
+    res.status(400).json({
+      message: 'Token tidak valid'
+    });
+  }
+};
+
+const verifyAdmin = (req, res, next) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({
+      message: 'Akses admin ditolak'
+    });
+  }
+
+  next();
 };
 
 // ====================== FUNGSI BANTU ======================
@@ -1097,6 +1118,97 @@ io.on('connection', (socket) => {
     delete onlineUsers[socket.id];
     io.emit('update online users', Object.values(onlineUsers));
   });
+});
+
+// ====================== ADMIN ROUTES ======================
+
+// Ambil semua user
+app.get('/api/admin/users', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const users = await User.find().select('-password');
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Hapus user
+app.delete('/api/admin/users/:id', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+
+    if (!user) {
+      return res.status(404).json({
+        message: 'User tidak ditemukan'
+      });
+    }
+
+    // jangan hapus admin
+    if (user.role === 'admin') {
+      return res.status(403).json({
+        message: 'Admin tidak bisa dihapus'
+      });
+    }
+
+    // hapus materi user
+    await Materi.deleteMany({
+      userId: user._id
+    });
+
+    // hapus user
+    await User.findByIdAndDelete(req.params.id);
+
+    res.json({
+      message: 'User berhasil dihapus'
+    });
+
+  } catch (err) {
+    res.status(500).json({
+      message: err.message
+    });
+  }
+});
+
+// Ambil semua materi
+app.get('/api/admin/materi', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+
+    const materi = await Materi.find()
+      .populate('userId', 'name email')
+      .sort({ createdAt: -1 });
+
+    res.json(materi);
+
+  } catch (err) {
+    res.status(500).json({
+      message: err.message
+    });
+  }
+});
+
+// Hapus materi
+app.delete('/api/admin/materi/:id', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+
+    const materi = await Materi.findById(req.params.id);
+
+    if (!materi) {
+      return res.status(404).json({
+        message: 'Materi tidak ditemukan'
+      });
+    }
+
+    await Materi.findByIdAndDelete(req.params.id);
+
+    res.json({
+      message: 'Materi berhasil dihapus'
+    });
+
+  } catch (err) {
+    res.status(500).json({
+      message: err.message
+    });
+  }
 });
 
 // ====================== START SERVER ======================
