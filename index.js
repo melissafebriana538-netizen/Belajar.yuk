@@ -472,192 +472,308 @@ async function completeStep(topic, totalSteps) {
 }
 app.post('/api/chat-ai', async (req, res) => {
   const { messages, selectedOption, topic, stepState } = req.body;
-  
-  // ========== VALIDASI API KEY ==========
-  const GROQ_API_KEY = process.env.GROQ_API_KEY;
-  if (!GROQ_API_KEY) {
-    console.error('❌ GROQ_API_KEY tidak ditemukan di environment');
-    return res.status(500).json({
-      type: 'text',
-      content: '⚠️ Konfigurasi AI belum lengkap. Silakan hubungi administrator.',
-      error: 'GROQ_API_KEY missing'
-    });
-  }
-
-  console.log('📨 Request:', { selectedOption, topic, stepState: !!stepState, messagesLength: messages?.length });
 
   try {
-    // ========== MODE STEP ==========
-    if (selectedOption === 'step') {
-      const currentStep = stepState?.stepIndex || 1;
-      const totalSteps = stepState?.totalSteps || 16;
-      const currentTopic = topic || messages?.find(m => m.role === 'user')?.content || 'belajar';
-      
-      if (currentStep <= totalSteps) {
-        const stepData = await generateStep(currentTopic, currentStep, totalSteps, GROQ_API_KEY);
-        return res.json(stepData);
-      } else {
-        return res.json({ type: 'step_complete', message: `🎉 Selamat! Anda telah menyelesaikan ${totalSteps} langkah.` });
-      }
-    }
 
-    // ========== HANDLE JAWABAN STEP ==========
-    const lastUserMsg = messages?.filter(m => m.role === 'user').pop();
-    
-    if (lastUserMsg?.content.toLowerCase().startsWith('jawaban:')) {
+    // ================= STEP MODE =================
+    // ================= STEP MODE =================
+if (selectedOption === 'step') {
+  const currentStep = stepState?.stepIndex || 1;
+  const totalSteps = stepState?.totalSteps || 16;  // <-- default 16 langkah
+  const currentTopic = topic || messages.find(m => m.role === 'user')?.content || 'belajar';
+
+  if (currentStep <= totalSteps) {
+    const stepData = await generateStep(currentTopic, currentStep, totalSteps);
+    return res.json(stepData);
+  } else {
+    return res.json({ type: 'step_complete', message: `🎉 Selamat! Anda telah menyelesaikan ${totalSteps} langkah.` });
+  }
+}
+
+    // ================= HANDLE JAWABAN STEP =================
+    const lastUserMsg = messages
+      .filter(m => m.role === 'user')
+      .pop();
+
+    if (
+      lastUserMsg &&
+      lastUserMsg.content.toLowerCase().startsWith('jawaban:')
+    ) {
+
       const match = lastUserMsg.content.match(/jawaban:\s*([A-D])/i);
-      const userAnswerLetter = match ? match[1].toUpperCase() : null;
+
+      const userAnswerLetter = match
+        ? match[1].toUpperCase()
+        : null;
+
       const currentStepIndex = stepState?.stepIndex || 1;
       const totalSteps = stepState?.totalSteps || 5;
       const currentTopic = topic || 'belajar';
 
       if (currentStepIndex >= totalSteps) {
+
         return res.json({
           type: 'step_complete',
-          message: `✅ Jawaban diterima. Anda telah menyelesaikan ${totalSteps} langkah.`
+          message:
+            `✅ Jawaban diterima. Anda telah menyelesaikan ` +
+            `${totalSteps} langkah.`
         });
+
       } else {
+
         const nextStepIndex = currentStepIndex + 1;
-        const nextStep = await generateStep(currentTopic, nextStepIndex, totalSteps, userAnswerLetter, GROQ_API_KEY);
+
+        const nextStep = await generateStep(
+          currentTopic,
+          nextStepIndex,
+          totalSteps,
+          userAnswerLetter
+        );
+
         return res.json(nextStep);
       }
     }
 
-    // ========== BUILD PROMPT (TAPI TIDAK TERLALU PANJANG) ==========
-    const lastUserMessage = lastUserMsg?.content || 'Halo';
-    
-    // Batasi history chat yang dikirim (hanya 5 pesan terakhir)
-    const limitedHistory = messages?.slice(-5) || [];
-    
-    let userPrompt = '';
-    let expectedResponseType = '';
-    
-    // ===== SUBTOPIC (PILIH SUBTOPIK) =====
-    if (lastUserMessage.toLowerCase().startsWith('pilih:')) {
-      const subtopicName = lastUserMessage.replace(/^pilih:\s*/i, '').trim();
-      userPrompt = `User memilih subtopik: "${subtopicName}" dari topik utama "${topic || 'belajar'}". Berikan penjelasan mendalam tentang subtopik ini. Sertakan contoh konkret. Setelah penjelasan, berikan 2 pilihan aksi: Quiz atau Step by Step.`;
-      expectedResponseType = 'explanation_with_options';
+    // ================= SYSTEM PROMPT =================
+const systemPrompt = `
+Anda adalah AI tutor profesional berbasis kurikulum akademik.
+
+1. SUBTOPIC
+Jika user minta topik baru:
+Output:
+{
+  "type": "subtopics",
+  "message": "...",
+  "options": [...]
+}
+
+2. PENJELASAN + OPSI
+Jika user pilih subtopik (diawali "Pilih:")
+Output:
+{
+  "type": "explanation_with_options",
+  "content": "...",
+  "topic": "...",
+  "message": "...",
+  "options": ["Quiz","Pemahaman Step by Step"]
+}
+
+3. QUIZ
+Jika user pilih Quiz:
+Output:
+{
+  "type": "quiz",
+  "questions": [...],
+  "topic": "..."
+}
+
+4. STEP
+Jika user pilih Step:
+Frontend akan handle sendiri.
+
+HANYA JSON.
+
+ATURAN KHUSUS SUBTOPIK:
+- Saat output "type" adalah "subtopics", buat JUMLAH sub topik MAKSIMAL 20.
+- Jika model ingin memberikan lebih dari 20, potong menjadi 20 (prioritaskan sub topik paling relevan dan berurutan logis).
+`;
+
+
+
+
+
+    // ================= USER PROMPT =================
+    const lastUserMsg2 = messages
+      .filter(m => m.role === 'user')
+      .pop();
+
+    let userPrompt = "";
+
+    // ===== QUIZ =====
+    if (selectedOption === 'quiz') {
+
+      userPrompt = `
+User memilih QUIZ untuk topik "${topic}"
+
+Buat 10 soal pilihan ganda dengan level:
+
+1-3 easy
+4-7 medium
+8-10 hard
+
+Setiap soal memiliki:
+- text
+- level
+- formula
+- explanation
+- options
+- correct
+
+HANYA JSON.
+`;
+
     }
-    // ===== QUIZ MODE =====
-    else if (selectedOption === 'quiz') {
-      userPrompt = `Buat 5 soal pilihan ganda untuk topik "${topic || lastUserMessage}". Setiap soal: text, 4 options, correct (0-3), level (easy/medium/hard), formula, explanation.`;
-      expectedResponseType = 'quiz';
+    // ===== SUBTOPIC =====
+    else if (
+      lastUserMsg2 &&
+      lastUserMsg2.content.toLowerCase().startsWith('pilih:')
+    ) {
+
+      const subtopicName = lastUserMsg2.content
+        .replace(/^pilih:\s*/i, '')
+        .trim();
+
+      userPrompt =
+        `User memilih subtopik "${subtopicName}". ` +
+        `Berikan penjelasan mendalam dan opsi Quiz & Step.`;
+
     }
-    // ===== MINTA SUBTOPIK BARU =====
+    // ===== DEFAULT =====
     else {
-      userPrompt = `User ingin belajar tentang: "${lastUserMessage}". Buat daftar 5-10 subtopik yang relevan dan berurutan dari dasar ke lanjutan.`;
-      expectedResponseType = 'subtopics';
+
+      userPrompt = lastUserMsg2
+        ? lastUserMsg2.content
+        : "Halo";
     }
 
-    console.log('📝 Sending prompt to Groq:', userPrompt.substring(0, 200) + '...');
+    // ================= FULL PROMPT =================
+    const fullPrompt = `
+${systemPrompt}
 
-    // ========== CALL GROQ API ==========
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${GROQ_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          {
-            role: 'system',
-            content: `Anda adalah AI tutor profesional. Selalu respons dengan JSON valid. Jangan tambahkan teks di luar JSON.
-            
-Format respons:
-- Untuk subtopik baru: { "type": "subtopics", "message": "Pilih subtopik:", "options": ["subtopik 1", "subtopik 2", ...] }
-- Untuk penjelasan subtopik: { "type": "explanation_with_options", "content": "penjelasan...", "topic": "...", "message": "Apa yang ingin Anda lakukan?", "options": ["Quiz", "Pemahaman Step by Step"] }
-- Untuk quiz: { "type": "quiz", "topic": "...", "questions": [ { "text": "...", "options": ["...", "...", "...", "..."], "correct": 0, "level": "easy", "formula": "...", "explanation": "..." } ] }`
-          },
-          { role: 'user', content: userPrompt }
-        ],
-        temperature: 0.6,
-        max_tokens: 2000
-      })
-    });
+Riwayat:
+${JSON.stringify(messages)}
+
+Instruksi:
+${userPrompt}
+`;
+
+    // ================= CALL AI =================
+    const response = await fetch(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            {
+              role: 'user',
+              content: fullPrompt
+            }
+          ],
+          temperature: 0.6,
+          response_format: {
+            type: "json_object"
+          }
+        })
+      }
+    );
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`❌ Groq API Error ${response.status}:`, errorText);
-      
-      // Handle rate limit specifically
-      if (response.status === 429) {
-        return res.status(429).json({
-          type: 'text',
-          content: '⚠️ AI sedang sibuk (banyak pengguna). Silakan coba lagi dalam beberapa menit.'
-        });
-      }
-      
-      throw new Error(`Groq API responded with ${response.status}`);
+      throw new Error('AI gagal');
     }
 
     const data = await response.json();
-    let aiMessage = data.choices[0].message.content;
-    aiMessage = aiMessage.replace(/```json|```/g, '').trim();
-    
-    console.log('📥 AI Response:', aiMessage.substring(0, 300));
-    
-    let parsed;
-    try {
-      parsed = JSON.parse(aiMessage);
-    } catch (parseError) {
-      console.error('❌ JSON Parse Error:', aiMessage);
-      // Fallback: buat respons manual
-      if (expectedResponseType === 'subtopics') {
-        parsed = {
-          type: 'subtopics',
-          message: `Topik: ${lastUserMessage}`,
-          options: [`Pengenalan ${lastUserMessage}`, `Konsep Dasar ${lastUserMessage}`, `Contoh ${lastUserMessage}`, `Latihan ${lastUserMessage}`, `Evaluasi ${lastUserMessage}`]
-        };
-      } else if (expectedResponseType === 'quiz') {
-        parsed = {
-          type: 'quiz',
-          topic: topic || lastUserMessage,
-          questions: [
-            {
-              text: `Apa yang dimaksud dengan ${topic || lastUserMessage}?`,
-              options: ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D'],
-              correct: 0,
-              level: 'easy',
-              formula: '',
-              explanation: 'Pelajari materi lebih lanjut untuk memahami jawabannya.'
-            }
-          ]
-        };
-      } else {
-        parsed = {
-          type: 'text',
-          content: `Maaf, saya mengalami gangguan teknis. Silakan coba lagi dengan pertanyaan yang lebih spesifik.`
-        };
-      }
-    }
-    
-    // ========== NORMALIZE OPTIONS ==========
-    if (parsed.options && Array.isArray(parsed.options)) {
-      parsed.options = parsed.options.map(opt => 
-        typeof opt === 'object' ? (opt.name || opt.text || String(opt)) : opt
+
+    let aiMessage =
+      data.choices[0].message.content;
+
+    aiMessage = aiMessage
+      .replace(/```json|```/g, '')
+      .trim();
+
+    let parsed = JSON.parse(aiMessage);
+
+    // ================= NORMALIZE OPTIONS =================
+    if (
+      parsed.options &&
+      Array.isArray(parsed.options)
+    ) {
+
+      parsed.options = parsed.options.map(opt =>
+        typeof opt === 'object'
+          ? (opt.name || opt.text || String(opt))
+          : opt
       );
     }
-    
+
+    // ================= FALLBACK QUIZ =================
+    if (
+      selectedOption === 'quiz' &&
+      (
+        parsed.type !== 'quiz' ||
+        !parsed.questions ||
+        parsed.questions.length === 0
+      )
+    ) {
+
+      const levels = [
+        'easy',
+        'easy',
+        'easy',
+        'medium',
+        'medium',
+        'medium',
+        'medium',
+        'hard',
+        'hard',
+        'hard'
+      ];
+
+      const fallbackQuestions = [];
+
+      for (let i = 0; i < 10; i++) {
+
+        fallbackQuestions.push({
+          text:
+            `Soal ${i + 1} tentang ${topic}`,
+
+          options: [
+            'Jawaban A',
+            'Jawaban B',
+            'Jawaban C',
+            'Jawaban D'
+          ],
+
+          correct: 0,
+
+          level: levels[i],
+
+          formula:
+            levels[i] === 'easy'
+              ? 'Rumus Dasar'
+              : 'Rumus Lanjutan',
+
+          explanation:
+            `Penjelasan soal ${i + 1}`
+        });
+      }
+
+      parsed = {
+        type: 'quiz',
+        topic: topic || 'topik',
+        questions: fallbackQuestions
+      };
+    }
+
+    // ================= RETURN =================
     return res.json(parsed);
-    
+
   } catch (err) {
-    console.error('❌ AI Error Detail:', {
-      message: err.message,
-      stack: err.stack,
-      selectedOption,
-      topic
-    });
-    
-    // Kirim error spesifik ke frontend
+
+    console.error("❌ AI Error:", err);
+
     return res.status(500).json({
       type: 'text',
-      content: `⚠️ ${err.message.includes('429') ? 'AI sedang sibuk, coba lagi nanti.' : 'Terjadi kesalahan pada server. Silakan coba lagi.'}`,
-      errorDetails: process.env.NODE_ENV === 'development' ? err.message : undefined
+      content: 'AI sedang sibuk, coba lagi.'
     });
   }
 });
+
+
   
 
 // ====================== OTHER ROUTES ======================
