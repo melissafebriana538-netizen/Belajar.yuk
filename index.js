@@ -122,28 +122,8 @@ const RoomDocument = require('./models/roomDocument');
 // VERIFY TOKEN
 const verifyToken = (req, res, next) => {
   const token = req.header('x-auth-token');
-
-  if (!token) {
-    return res.status(401).json({
-      message: 'Akses ditolak'
-    });
-  }
-
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    req.user = decoded;
-
-    next();
-
-  } catch (err) {
-    res.status(400).json({
-      message: 'Token tidak valid'
-    });
-  }
-};
-
-const verifyAdmin = (req, res, next) => {
+  if (!token) return res.status(401).json({ message: 'Akses ditolak' });
+  const verifyAdmin = (req, res, next) => {
   if (req.user.role !== 'admin') {
     return res.status(403).json({
       message: 'Akses admin ditolak'
@@ -151,6 +131,14 @@ const verifyAdmin = (req, res, next) => {
   }
 
   next();
+};
+  try {
+    const decoded = jwt.verify(token, 'SECRET_KEY');
+    req.user = decoded;
+    next();
+  } catch (err) {
+    res.status(400).json({ message: 'Token tidak valid' });
+  }
 };
 
 // ====================== FUNGSI BANTU ======================
