@@ -558,9 +558,6 @@ Output:
   "options": ["Quiz","Pemahaman Step by Step"]
 }
 
-3. SUBTOPIC (Jika user memilih "Pemahaman Step by Step" atau subtopik tertentu)
-Output: seperti format "step" (lihat aturan STEP di bawah).
-
 3. QUIZ
 Jika user pilih Quiz:
 Output:
@@ -580,6 +577,7 @@ ATURAN KHUSUS SUBTOPIK:
 - Saat output "type" adalah "subtopics", buat JUMLAH sub topik MAKSIMAL 20.
 - Jika model ingin memberikan lebih dari 20, potong menjadi 20 (prioritaskan sub topik paling relevan dan berurutan logis).
 `;
+
 
 
 
