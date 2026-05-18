@@ -417,7 +417,7 @@ FORMAT JSON (WAJIB, tanpa teks lain):
   "question": {
     "text": "Soal pilihan ganda...",
     "level": "${level}",
-    "options": ["A. ...", "B. ...", "C. ...", "D. ..."],
+    "options": ["...", "...", "...", "..."],
     "correct": 0,
     "explanation": "Pembahasan singkat jawaban benar"
   }
@@ -455,7 +455,7 @@ FORMAT JSON (WAJIB, tanpa teks lain):
       question: {
         text: `Apa poin penting dari langkah ${stepIndex}?`,
         level: level,
-        options: ['A. Pilihan 1', 'B. Pilihan 2', 'C. Pilihan 3', 'D. Pilihan 4'],
+        options: ['Pilihan 1', 'Pilihan 2', 'Pilihan 3', 'Pilihan 4'],
         correct: 0,
         explanation: 'Jawaban yang benar adalah A.'
       }
