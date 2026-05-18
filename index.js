@@ -40,10 +40,18 @@ mongoose.connect(dbURI)
 const UserSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
+
+  role: {
+    type: String,
+    enum: ['admin', 'student'],
+    default: 'student'
+  },
+
   name: { type: String, default: '' },
   nim: { type: String, default: '' },
   university: { type: String, default: '' },
   avatar: { type: String, default: '' },
+
   preferences: {
     darkMode: { type: Boolean, default: false },
     language: { type: String, default: 'id' },
@@ -272,7 +280,7 @@ app.post('/api/register', async (req, res) => {
     if (userExist) return res.status(400).json({ message: 'Email sudah terdaftar' });
     const hashedPassword = await bcrypt.hash(password, 10);
     const userName = name && name.trim() ? name : email.split('@')[0];
-    const userBaru = new User({ email, password: hashedPassword, name: userName });
+    const userBaru = new User({email, password: hashedPassword, name: userName, role: 'student'});
     await userBaru.save();
     const token = jwt.sign({ userId: userBaru._id, email: userBaru.email, name: userBaru.name }, 'SECRET_KEY', { expiresIn: '7d' });
     res.json({ message: 'Registrasi berhasil', token, user: { email: userBaru.email, name: userBaru.name } });
@@ -289,8 +297,8 @@ app.post('/api/login', async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User tidak ditemukan' });
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ message: 'Password salah' });
-    const token = jwt.sign({ userId: user._id, email: user.email, name: user.name }, 'SECRET_KEY', { expiresIn: '7d' });
-    res.json({ message: 'Login berhasil', token, user: { email: user.email, name: user.name } });
+    const token = jwt.sign({userId: user._id, email: user.email, name: user.name, role: user.role}, 'SECRET_KEY', { expiresIn: '7d' });
+    res.json({message: 'Login berhasil', token, user: { email: user.email, name: user.name, role: user.role}});
   } catch (error) {
     res.status(500).json({ message: 'Terjadi error', error: error.message });
   }
@@ -865,8 +873,8 @@ app.put('/api/profile', verifyToken, async (req, res) => {
     if (university !== undefined) user.university = university;
     if (preferences) user.preferences = { ...user.preferences, ...preferences };
     await user.save();
-    const newToken = jwt.sign({ userId: user._id, email: user.email, name: user.name }, 'SECRET_KEY', { expiresIn: '7d' });
-    res.json({ message: 'Profil diperbarui', token: newToken, user: { email: user.email, name: user.name } });
+    const newToken = jwt.sign({userId: user._id, email: user.email, name: user.name, role: user.role}, 'SECRET_KEY', { expiresIn: '7d' });
+    res.json({ message: 'Profil diperbarui', token: newToken, user: { email: user.email, name: user.name, role: user.role}});
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
