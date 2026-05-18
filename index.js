@@ -181,19 +181,11 @@ async function generateQuizFromText(text, title) {
   const data = await response.json();
   const aiMessage = data.choices[0].message.content;
   let cleaned = aiMessage.trim().replace(/```json/g, '').replace(/```/g, '');
-  let parsed;
-
-try {
-   parsed = JSON.parse(cleaned);
-} catch(err) {
-   console.error("JSON Parse Error:", err);
-   throw new Error("AI menghasilkan format invalid");
-}
+  const parsed = JSON.parse(cleaned);
   let questions = parsed.questions || (Array.isArray(parsed) ? parsed : []);
   return questions.filter(q => q.text && Array.isArray(q.options) && q.options.length === 4 && typeof q.correct === 'number');
 }
 
-// ====================== MULTER UPLOAD ======================
 // ====================== MULTER UPLOAD ======================
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -206,58 +198,21 @@ const storage = multer.diskStorage({
     cb(null, unique + path.extname(file.originalname));
   }
 });
+const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
 
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const allowed = [
-      'application/pdf',
-      'text/plain',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    ];
-
-    if (allowed.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Format file tidak didukung'));
-    }
-  }
-});
 const avatarStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     const dir = './uploads/avatars';
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     cb(null, dir);
   },
-
   filename: (req, file, cb) => {
     const unique = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, unique + path.extname(file.originalname));
   }
 });
+const uploadAvatar = multer({ storage: avatarStorage, limits: { fileSize: 2 * 1024 * 1024 } });
 
-const uploadAvatar = multer({
-  storage: avatarStorage,
-  limits: { fileSize: 5 * 1024 * 1024 },
-
-  fileFilter: (req, file, cb) => {
-    const allowed = [
-      'image/jpeg',
-      'image/png',
-      'image/jpg',
-      'image/webp'
-    ];
-
-    if (allowed.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Format avatar tidak didukung'));
-    }
-  }
-});
 // ====================== AUTH ROUTES ======================
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'FRONTEND', 'index.html'));
@@ -449,8 +404,7 @@ TUGAS:
    - Soal harus ORISINAL, tidak berulang dengan langkah sebelumnya.
    - Sesuaikan tingkat kesulitan dengan level.
 5. Sertakan pembahasan singkat untuk jawaban benar.
-Setiap options HARUS berupa teks polos tanpa awalan A., B., C., atau D.
-Frontend yang akan menampilkan label huruf.
+
 FORMAT JSON (WAJIB, tanpa teks lain):
 {
   "type": "step",
@@ -463,7 +417,7 @@ FORMAT JSON (WAJIB, tanpa teks lain):
   "question": {
     "text": "Soal pilihan ganda...",
     "level": "${level}",
-    "options": ["...", "...", "...", "..."],
+    "options": ["A. ...", "B. ...", "C. ...", "D. ..."],
     "correct": 0,
     "explanation": "Pembahasan singkat jawaban benar"
   }
@@ -501,14 +455,13 @@ FORMAT JSON (WAJIB, tanpa teks lain):
       question: {
         text: `Apa poin penting dari langkah ${stepIndex}?`,
         level: level,
-        options: ['Pilihan 1', 'Pilihan 2', 'Pilihan 3', 'Pilihan 4'],
+        options: ['A. Pilihan 1', 'B. Pilihan 2', 'C. Pilihan 3', 'D. Pilihan 4'],
         correct: 0,
         explanation: 'Jawaban yang benar adalah A.'
       }
     };
   }
 }
-
 
 
 async function completeStep(topic, totalSteps) {
@@ -603,8 +556,7 @@ Output:
   "topic": "...",
   "message": "...",
   "options": ["Quiz","Pemahaman Step by Step"]
-  }
-
+}
 
 3. QUIZ
 Jika user pilih Quiz:
