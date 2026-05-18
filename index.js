@@ -380,60 +380,57 @@ app.post('/api/upload', verifyToken, upload.single('file'), async (req, res) => 
 
 // ====================== AI CHAT (Step & Quiz) ======================
 async function generateStep(topic, stepIndex, totalSteps, previousAnswer = null) {
-  let prompt = `
-Anda adalah AI tutor profesional.
+  // Tentukan level berdasarkan stepIndex
+  let level = '';
+  if (stepIndex <= 3) level = 'easy';
+  else if (stepIndex <= 10) level = 'medium';
+  else level = 'hard';
 
-Topik pembelajaran: "${topic}"
+  const levelDesc = {
+    easy: 'Dasar – konsep fundamental, soal sederhana',
+    medium: 'Menengah – penerapan rumus, analisis sederhana',
+    hard: 'Lanjutan – pemecahan masalah kompleks, multi-langkah'
+  };
 
-Pembelajaran dilakukan bertahap sebanyak ${totalSteps} langkah.
+  let prompt = `Anda adalah AI tutor profesional.
+Topik: "${topic}"
+Ini adalah langkah ${stepIndex} dari ${totalSteps} (level: ${level} - ${levelDesc[level]}).
 
-ATURAN PENTING:
+TUGAS:
+1. Berikan penjelasan mendalam tentang satu aspek spesifik dari topik ini, sesuai level.
+2. Jika topik eksakta (matematika/fisika/statistika): sertakan rumus, arti simbol, contoh perhitungan, langkah pengerjaan.
+3. Jika topik non-eksakta: jelaskan konsep, berikan contoh konkret, aplikasi sederhana.
+4. Setelah penjelasan, buat 1 soal pilihan ganda yang menguji pemahaman langkah ini.
+   - Soal harus ORISINAL, tidak berulang dengan langkah sebelumnya.
+   - Sesuaikan tingkat kesulitan dengan level.
+5. Sertakan pembahasan singkat untuk jawaban benar.
 
-1. Jika topik berkaitan dengan matematika/fisika/statistika:
-   - wajib jelaskan rumus
-   - wajib jelaskan fungsi rumus
-   - wajib jelaskan arti simbol
-   - wajib berikan contoh perhitungan
-   - wajib berikan langkah pengerjaan
-
-2. Penjelasan harus DETAIL dan mudah dipahami mahasiswa.
-
-3. Setelah penjelasan:
-   - buat 1 soal latihan
-   - sertakan level kesulitan
-   - sertakan pembahasan singkat
-
-FORMAT JSON:
-
+FORMAT JSON (WAJIB, tanpa teks lain):
 {
   "type": "step",
   "stepIndex": ${stepIndex},
   "totalSteps": ${totalSteps},
-
-  "explanation": "Penjelasan detail",
-
-  "formula": "Rumus yang digunakan",
-
+  "explanation": "Penjelasan detail...",
+  "formula": "Rumus (jika ada, string kosong jika tidak)",
   "formulaExplanation": "Penjelasan rumus",
-
-  "example": "Contoh pengerjaan langkah demi langkah",
-
+  "example": "Contoh konkret (bisa hitungan atau ilustrasi)",
   "question": {
-    "text": "Soal latihan",
-    "level": "easy",
-    "explanation": "Pembahasan singkat",
-    "options": ["A","B","C","D"],
-    "correct": 0
+    "text": "Soal pilihan ganda...",
+    "level": "${level}",
+    "options": ["A. ...", "B. ...", "C. ...", "D. ..."],
+    "correct": 0,
+    "explanation": "Pembahasan singkat jawaban benar"
   }
-}
-`;
+}`;
+
+  if (previousAnswer) {
+    prompt = `Jawaban siswa untuk langkah sebelumnya: "${previousAnswer}". Berikan feedback singkat (1-2 kalimat) apakah jawabannya tepat, lalu lanjutkan ke langkah ${stepIndex}.\n\n${prompt}`;
+  }
+
   try {
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Authorization': `Bearer ${process.env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
         messages: [{ role: 'user', content: prompt }],
@@ -441,10 +438,9 @@ FORMAT JSON:
         response_format: { type: "json_object" }
       })
     });
-    if (!response.ok) throw new Error('Gagal generate step dari AI');
+    if (!response.ok) throw new Error('Gagal generate step');
     const data = await response.json();
-    let content = data.choices[0].message.content;
-    content = content.replace(/```json|```/g, '').trim();
+    let content = data.choices[0].message.content.replace(/```json|```/g, '').trim();
     return JSON.parse(content);
   } catch (error) {
     console.error('Error generateStep:', error);
@@ -452,11 +448,16 @@ FORMAT JSON:
       type: 'step',
       stepIndex,
       totalSteps,
-      explanation: `Penjelasan untuk langkah ${stepIndex} dari topik "${topic}". (AI sedang sibuk, ini konten sementara)`,
+      explanation: `Penjelasan untuk langkah ${stepIndex} dari topik "${topic}". (AI sedang sibuk)`,
+      formula: '',
+      formulaExplanation: '',
+      example: '',
       question: {
-        text: `Apa yang dipelajari pada langkah ${stepIndex}?`,
-        options: ["Pilihan A", "Pilihan B", "Pilihan C", "Pilihan D"],
-        correct: 0
+        text: `Apa poin penting dari langkah ${stepIndex}?`,
+        level: level,
+        options: ['A. Pilihan 1', 'B. Pilihan 2', 'C. Pilihan 3', 'D. Pilihan 4'],
+        correct: 0,
+        explanation: 'Jawaban yang benar adalah A.'
       }
     };
   }
@@ -475,36 +476,19 @@ app.post('/api/chat-ai', async (req, res) => {
   try {
 
     // ================= STEP MODE =================
-    if (selectedOption === 'step') {
+    // ================= STEP MODE =================
+if (selectedOption === 'step') {
+  const currentStep = stepState?.stepIndex || 1;
+  const totalSteps = stepState?.totalSteps || 16;  // <-- default 16 langkah
+  const currentTopic = topic || messages.find(m => m.role === 'user')?.content || 'belajar';
 
-      const currentStep = stepState?.stepIndex || 1;
-      const totalSteps = stepState?.totalSteps || 5;
-
-      const currentTopic =
-        topic ||
-        messages.find(m => m.role === 'user')?.content ||
-        'belajar';
-
-      if (currentStep <= totalSteps) {
-
-        const stepData = await generateStep(
-          currentTopic,
-          currentStep,
-          totalSteps
-        );
-
-        return res.json(stepData);
-
-      } else {
-
-        const completeData = await completeStep(
-          currentTopic,
-          totalSteps
-        );
-
-        return res.json(completeData);
-      }
-    }
+  if (currentStep <= totalSteps) {
+    const stepData = await generateStep(currentTopic, currentStep, totalSteps);
+    return res.json(stepData);
+  } else {
+    return res.json({ type: 'step_complete', message: `🎉 Selamat! Anda telah menyelesaikan ${totalSteps} langkah.` });
+  }
+}
 
     // ================= HANDLE JAWABAN STEP =================
     const lastUserMsg = messages

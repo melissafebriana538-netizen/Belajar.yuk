@@ -149,7 +149,7 @@
             <div class="mt-auto p-6">
                 <div class="flex items-center gap-3 p-2 border-t border-slate-100 pt-6 dark:border-slate-800">
                     <div class="size-10 rounded-full bg-slate-200 overflow-hidden">
-                        <img id="sidebarAvatar" src="https://via.placeholder.com/40" alt="User"/>
+                       <img id="sidebarAvatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 24 24' fill='%232b7cee'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E" alt="User"/>
                     </div>
                     <div class="flex flex-col">
                         <p id="sidebarName" class="text-sm font-bold text-slate-800 dark:text-slate-200">Loading...</p>
@@ -275,7 +275,7 @@
             <div id="profil-content" class="hidden flex flex-col h-full overflow-y-auto profile-bg-gradient p-6 lg:p-10">
                 <div class="mx-auto max-w-4xl space-y-8">
                     <section class="flex flex-col gap-6 rounded-2xl bg-white p-6 shadow-sm dark:bg-slate-900 md:flex-row md:items-center">
-                        <div class="relative group"><div class="h-32 w-32 overflow-hidden rounded-full border-4 border-white shadow-md ring-2 ring-primary/20"><img id="profileAvatar" class="h-full w-full object-cover" src="https://via.placeholder.com/150"></div><button id="changePhotoBtn" class="absolute bottom-0 right-0 flex h-10 w-10 items-center justify-center rounded-full bg-primary text-white shadow-lg ring-4 ring-white"><span class="material-symbols-outlined text-sm">photo_camera</span></button></div>
+                        <div class="relative group"><div class="h-32 w-32 overflow-hidden rounded-full border-4 border-white shadow-md ring-2 ring-primary/20"><img id="profileAvatar" class="h-full w-full object-cover" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='150' viewBox='0 0 24 24' fill='%232b7cee'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E"></div><button id="changePhotoBtn" class="absolute bottom-0 right-0 flex h-10 w-10 items-center justify-center rounded-full bg-primary text-white shadow-lg ring-4 ring-white"><span class="material-symbols-outlined text-sm">photo_camera</span></button></div>
                         <div class="flex-1"><h1 id="profileDisplayName" class="text-2xl font-bold">Loading...</h1><p class="text-slate-500">Mahasiswa</p></div>
                     </section>
                     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2"><div class="rounded-xl bg-white p-5 shadow-sm dark:bg-slate-900 border-l-4 border-primary"><div class="flex items-center gap-4"><div class="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary"><span class="material-symbols-outlined">menu_book</span></div><div><p class="text-sm">Materi Selesai</p><p id="profileMateriCount" class="text-xl font-bold">0</p></div></div></div><div class="rounded-xl bg-white p-5 shadow-sm dark:bg-slate-900 border-l-4 border-secondary"><div class="flex items-center gap-4"><div class="flex h-12 w-12 items-center justify-center rounded-lg bg-secondary/10 text-secondary"><span class="material-symbols-outlined">assignment_turned_in</span></div><div><p class="text-sm">Kuis Diikuti</p><p id="profileQuizCount" class="text-xl font-bold">0</p></div></div></div></div>
@@ -359,7 +359,7 @@
         let currentModalStep = null;
         let stepState = {
           stepIndex: 1,
-          totalSteps: 5
+          totalSteps: 16
         };
 
         // ====================== NOTIFIKASI & SUARA ======================
@@ -468,18 +468,8 @@ function showAIFeedback(questionIndex, feedback, isSummary = false) {
 
     // Tambahkan padding agar lebih rapi
     feedbackDiv.classList.add('p-2', 'rounded', 'mt-2');
-
-    setTimeout(() => {
-        if (feedbackDiv) {
-            feedbackDiv.style.opacity = '0';
-            setTimeout(() => {
-                if (feedbackDiv && feedbackDiv.parentNode) {
-                    feedbackDiv.remove();
-                }
-            }, 500);
-        }
-    }, 5000);
 }
+
 
         // ====================== NAVIGASI ======================
         function showDashboard() { setActive("dashboard-content", "menu-dashboard"); loadDashboard(); }
@@ -680,7 +670,7 @@ async function selectOption(option, topic) {
      selected = 'step';
      stepState = {
         stepIndex: 1,
-        totalSteps: 5
+        totalSteps: 16
      };
     } 
     else {
@@ -866,6 +856,11 @@ async function submitModalQuiz(quiz) {
 function openStepModal(step, topic) {
     console.log("openStepModal - step:", step);
     currentModalStep = { step, topic };
+    currentStepContext = {
+        stepIndex: step.stepIndex,
+        totalSteps: step.totalSteps,
+        topic: topic
+    };
     
     // 1. Reset tombol submit: tampilkan dan ubah teks
     const submitBtn = document.getElementById("modalSubmitBtn");
@@ -913,65 +908,104 @@ async function submitModalStep(modalData) {
         alert("Silakan pilih jawaban terlebih dahulu.");
         return;
     }
-    const userAnswer = parseInt(selectedRadio.value);
-    const userAnswerText = step.question.options[userAnswer];
-    
-    // Panggil AI feedback (backend sudah diperbaiki untuk penjelasan panjang)
-    const feedback = await getAIFeedback(step.question.text, step.question.options, userAnswerText, step.question.correct);
-    const isCorrect = feedback.isCorrect;
-    const feedbackText = feedback.explanation;
-    
-    // Tampilkan feedback di area yang sesuai
+
+    const userAnswerIndex = parseInt(selectedRadio.value);
+    const userAnswerText = step.question.options[userAnswerIndex];
+    const correctAnswerText = step.question.options[step.question.correct];
+
+    // Tampilkan loading feedback
     const feedbackDiv = document.getElementById("stepFeedback");
     if (feedbackDiv) {
-        const icon = isCorrect ? '✅' : '❌';
-        feedbackDiv.innerHTML = `${icon} ${feedbackText}`;
-        feedbackDiv.className = `text-sm mt-2 p-2 rounded ${isCorrect ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`;
-        playFeedback(isCorrect);
+        feedbackDiv.innerHTML = '<span>⏳ Memeriksa jawaban...</span>';
+        feedbackDiv.className = 'text-sm mt-2 p-2 rounded bg-gray-100 text-gray-700';
     }
-    
+
+    // Panggil AI feedback
+    let feedback = { isCorrect: false, explanation: 'Terjadi kesalahan, coba lagi.' };
+    try {
+        const token = getToken();
+        const response = await fetch(`${API_BASE}/ai-feedback`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-auth-token': token },
+            body: JSON.stringify({
+                question: step.question.text,
+                options: step.question.options,
+                userAnswer: userAnswerText,
+                correctIndex: step.question.correct
+            })
+        });
+        if (response.ok) feedback = await response.json();
+    } catch (err) {
+        console.error('Error fetching AI feedback:', err);
+    }
+
+    // Tampilkan feedback dengan warna sesuai
+    if (feedbackDiv) {
+        const icon = feedback.isCorrect ? '✅' : '❌';
+        feedbackDiv.innerHTML = `${icon} ${feedback.explanation}`;
+        feedbackDiv.classList.remove('bg-gray-100', 'text-gray-700');
+        if (feedback.isCorrect) {
+            feedbackDiv.classList.add('bg-green-100', 'text-green-800');
+        } else {
+            feedbackDiv.classList.add('bg-red-100', 'text-red-800');
+        }
+        playFeedback(feedback.isCorrect);
+    }
+
     // Sembunyikan tombol submit
     const submitBtn = document.getElementById("modalSubmitBtn");
     submitBtn.style.display = "none";
-    
-    // Buat atau gunakan tombol "Lanjut ke Step Berikutnya"
-    let nextBtn = document.getElementById("nextStepBtn");
-    if (!nextBtn) {
-        nextBtn = document.createElement("button");
-        nextBtn.id = "nextStepBtn";
-        nextBtn.className = "bg-primary text-white px-4 py-2 rounded-lg mt-4";
-        document.getElementById("modalContent").appendChild(nextBtn);
-    }
+
+    // Hapus tombol lanjut lama jika ada
+    const oldNextBtn = document.getElementById("nextStepBtn");
+    if (oldNextBtn) oldNextBtn.remove();
+
+    // Buat tombol "Lanjut ke Step Berikutnya"
+    const nextBtn = document.createElement("button");
+    nextBtn.id = "nextStepBtn";
+    nextBtn.className = "bg-primary text-white px-4 py-2 rounded-lg mt-4";
     nextBtn.innerText = "Lanjut ke Step Berikutnya";
-    nextBtn.style.display = "block";
+    document.getElementById("modalContent").appendChild(nextBtn);
+
+    // Handler untuk tombol lanjut
     nextBtn.onclick = async () => {
-        const nextStepIndex = step.stepIndex + 1;
-        const totalSteps = step.totalSteps;
+        nextBtn.disabled = true;
+        nextBtn.innerText = "Memuat...";
+        const nextStepIndex = currentStepContext.stepIndex + 1;
+        const totalSteps = currentStepContext.totalSteps;
+
         if (nextStepIndex <= totalSteps) {
-            // Minta step berikutnya ke AI
-            const response = await fetch(`${API_BASE}/chat-ai`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-auth-token': getToken() },
-                body: JSON.stringify({
-                    messages: chatHistory,
-                    selectedOption: 'step',
-                    topic: topic,
-                    stepState: { stepIndex: nextStepIndex, totalSteps }
-                })
-            });
-            const data = await response.json();
-            if (data.type === 'step') {
-                openStepModal(data, topic);
-            } else if (data.type === 'step_complete') {
-                alert(data.message);
-                closeQuizModal();
-                addChatMessage('ai', data.message);
-                chatHistory.push({ role: 'assistant', content: data.message });
-                saveChatHistory();
+            try {
+                const response = await fetch(`${API_BASE}/chat-ai`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-auth-token': getToken() },
+                    body: JSON.stringify({
+                        messages: chatHistory,
+                        selectedOption: 'step',
+                        topic: currentStepContext.topic,
+                        stepState: { stepIndex: nextStepIndex, totalSteps: totalSteps }
+                    })
+                });
+                const data = await response.json();
+                if (data.type === 'step') {
+                    openStepModal(data, currentStepContext.topic);
+                } else if (data.type === 'step_complete') {
+                    alert(data.message);
+                    closeQuizModal();
+                    currentStepContext = null;
+                    stepState = { stepIndex: 1, totalSteps: 16 };
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Gagal memuat langkah berikutnya.');
+                nextBtn.disabled = false;
+                nextBtn.innerText = "Lanjut ke Step Berikutnya";
             }
         } else {
-            alert("Selesai!");
+            alert("🎉 Selamat! Anda telah menyelesaikan semua langkah.");
             closeQuizModal();
+            currentStepContext = null;
+            stepState = { stepIndex: 1, totalSteps: 16 };
         }
     };
 }
