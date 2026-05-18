@@ -673,7 +673,7 @@ User ingin belajar topik:
 Tugas:
 1. Berikan pengantar singkat topik
 2. Pecah materi menjadi beberapa subtopik pembelajaran
-3. Maksimal 15 subtopik
+3. Maksimal 6 subtopik
 4. Output HARUS type "subtopics"
 
 Format JSON:
